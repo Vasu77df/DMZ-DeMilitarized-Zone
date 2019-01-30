@@ -1,0 +1,80 @@
+Router>en
+Router#configure terminal
+Router(config)#int Gig6/0
+Router(config-if)#ip address 172.16.0.2 255.255.0.0
+Router(config-if)#no shut 
+
+To enable DHCP feature , default route and dns  in the router we use these commands:
+Router(config)#ip dhcp pool <name>
+Router(config-dhcp)#net 172.16.0.0 255.255.0.0
+Router(config-dhcp)#exit
+Router(config)#ip dhcp exclude 172.16.0.1 172.16.0.10
+Router(config)#default-router 172.16.0.1
+Router(config)#dns-server 8.8.8.8
+
+Now we need to enable OSPF routing functionality in routers in the internal network. For that we use the commands:
+Router(config)#router ospf <area number>
+Router(config-router)#do show ip route connect
+(shows all directly connected adjacent interface)
+Router(config-router)#network 192.168.0.1 0.0.0.255 area <number>
+Router(config-router)#network 172.18.0.1 0.0.255.255 area <number>
+(continue until all adjacent interfaces are added to the configuration)
+Router(config)#exit
+
+Now we must configure the Firewall a.k.a the ASA(Adaptive Security Appliance).First we configure the ASA settings and interface security using the CLI:
+
+ciscoasa>en
+ciscoasa#conf t
+ciscoasa(config)#hostname CISCOASA
+CISCOASA(config)#domain-name ccnasecurity.com
+CISCOASA(config)#clock set 22:16:00 Jan 28 2017
+
+Now we must configure the ASA interfaces VLAN 1 (inside) will have the highest security setting of 100 and  VLAN 2(outside) will have lowest security setting of 0. This is done by using the commands:
+CISCOASA(config)#int vlan <nummber>
+CISCOASA(config-if)#nameif <name>
+CISCOASA(config-if)#ip add 192.168.0.1 255.0.0.0
+CISCOASA(config-if)#security-level 100
+
+Now we configure a static route on the ASA outside interface to enable the AS to reach the external networks:
+CISCOASA(config)# route outside 0.0.0.0 0.0.0.0 192.168.200.1
+
+Now configure address translation using PAT and network objects.
+CISCOASA(config)#object network inside-net 
+CISCOASA(config-network-object)#subnet 192.168.0.1 255.255.255.0
+CISCOASA(config-network-object)#nat (inside,outside) dynamic interface
+CISCOASA(config-network-object)#end
+
+Now modify the default the MPF application inspection global service policy:
+CISCOASA(config)#class-map inspection_default
+CISCOASA(config-cmap)#match default-inspection-traffic
+CISCOASA(config-cmap)#exit
+CISCOASA(config)#policy-map global_policy
+CISCOASA(config-pmap)#class inspection_default
+CISCOASA(config-pmap-c)#inspect icmp
+CISCOASA(config-pmap-c)#exit
+CISCOASA(config)#service-policy global_policy
+
+
+  Now let us configure DMZ on interface VLAN 3 on the ASA:
+CISCOASA(config)#int vlan 3
+CISCOASA(config-if)#nameif dmz
+CISCOASA(config-if)#ip add 172.16.0.1 255.255.0.0
+CISCOASA(config-if)#security-level 70
+
+Assign ASA physical interface E0/2 to DMZ VLAN 3:
+CISCOASA(config-if)#int ethernet0/2
+CISCOASA(config-if)#switchport access vlan 3
+
+
+Configure a static NAT to the servers using a network object.
+CISCOASA(config)#object network dmz-server 
+CISCOASA(config-network-object)#host 10.0.0.2
+CISCOASA(config-network-object)#nat (dmz, outside) static 192.168.200.3
+CISCOASA(config-network-object)#exit
+
+Configure a named access list OUTSIDE -DMZ that permits TCP protocol on port 80 from any external host to the internal IP address of the servers. Apply access list to the ASA outside interface in the ‘IN’ direction.
+CISCOASA(config)#access-list OUTSIDE-DMZ permit icmp any host 10.0.0.2
+CISCOASA(config)#accss=list OUTSIDE-DMZ permit tcp any host 10.0.0.2 eq 80 
+CISCOASA(config)#access-group OUTSIDE-DMZ in interface outside 
+
+These are the steps needed to create a DMZ network. Complexity will vary according the internal and external network configurations and the type of DMZ architecture you use.
